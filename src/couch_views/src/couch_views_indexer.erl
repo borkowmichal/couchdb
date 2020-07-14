@@ -231,10 +231,24 @@ maybe_set_build_status(TxDb, Mrst1, _ViewVS, State) ->
 get_update_start_state(TxDb, Mrst, #{db_seq := undefined} = State) ->
     ViewVS = couch_views_fdb:get_creation_vs(TxDb, Mrst),
     ViewSeq = couch_views_fdb:get_update_seq(TxDb, Mrst),
+    DbSeq = fabric2_db:get_update_seq(TxDb),
+    DbVS = fabric2_fdb:seq_to_vs(DbSeq),
+    ViewVS1 = convert_version_stamp(ViewVS),
+    DbVS1 = convert_version_stamp(DbVS),
+
+    couch_task_status:add_task([
+        {type, indexer},
+        {database, Mrst#mrst.db_name},
+        {design_document, Mrst#mrst.idx_name},
+        {changes_done, 0},
+        {current_version_stamp, ViewVS1},
+        {db_version_stamp, DbVS1}
+    ]),
+    couch_task_status:set_update_frequency(500),
 
     State#{
         tx_db := TxDb,
-        db_seq := fabric2_db:get_update_seq(TxDb),
+        db_seq := DbSeq,
         view_vs := ViewVS,
         view_seq := ViewSeq,
         last_seq := ViewSeq
@@ -368,6 +382,7 @@ write_docs(TxDb, Mrst, Docs, State) ->
     if LastSeq == false -> ok; true ->
         couch_views_fdb:set_update_seq(TxDb, Sig, LastSeq)
     end,
+    update_tasks(length(Docs), LastSeq),
     DocsNumber.
 
 
@@ -541,3 +556,25 @@ key_size_limit() ->
 
 value_size_limit() ->
     config:get_integer("couch_views", "value_size_limit", ?VALUE_SIZE_LIMIT).
+
+
+update_tasks(NumChanges, false) ->
+    [Changes] = couch_task_status:get([changes_done]),
+    Changes2 = Changes + NumChanges,
+    couch_task_status:update([{changes_done, Changes2}]);
+
+update_tasks(NumChanges, LastSeq) ->
+    [Changes] = couch_task_status:get([changes_done]),
+    Changes2 = Changes + NumChanges,
+    VS = fabric2_fdb:seq_to_vs(LastSeq),
+    VS1 = convert_version_stamp(VS),
+    couch_task_status:update([{changes_done, Changes2},
+        {current_version_stamp, VS1}]).
+
+
+convert_version_stamp({_, Stamp, _, DocNumber}) ->
+    VS = integer_to_list(Stamp) ++ "-" ++ integer_to_list(DocNumber),
+    list_to_binary(VS);
+
+convert_version_stamp(_) ->
+    <<"N/A">>.
