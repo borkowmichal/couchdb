@@ -505,14 +505,15 @@ match({[{<<"$allMatch">>, _Arg}]}, _Value, _Cmp) ->
 
 % Matches when any key in the map value matches the
 % sub-selector Arg.
-match({[{<<"$keyMapMatch">>, Arg}]}, Value, Cmp) when is_map(Value) ->
+match({[{<<"$keyMapMatch">>, Arg}]}, Value, Cmp) when is_tuple(Value) ->
+    Keys = [Key || {Key, _} <- element(1, Value)],
     try
         lists:foreach(fun(V) ->
             case match(Arg, V, Cmp) of
                 true -> throw(matched);
                 _ -> ok
             end
-                      end, maps:keys(Value)),
+                      end,  Keys),
         false
     catch
         throw:matched ->
